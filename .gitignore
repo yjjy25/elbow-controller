@@ -1,0 +1,19 @@
+# Original archive and generated build output
+*.rar
+*.log
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.bin
+*.map
+*.lst
+*.lnp
+*.dep
+*.htm
+*.uvguix.*
+*.lock
+__pycache__/
+RED_Demo/RED_Demo/MDK-ARM/RED_Demo/
+RED_Demo/RED_Demo/MDK-ARM/.vscode/
