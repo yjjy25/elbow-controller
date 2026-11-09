@@ -9,6 +9,9 @@ volatile uint8_t CAN_Test_State;
 static WorkCanPacket request, reply;
 static uint8_t ready, have_reply, dirty, tx_pending;
 static uint32_t last_tx, last_rx, mailbox, pending_since;
+static uint16_t laser_mm[4];
+static uint32_t laser_rx_ms;
+static uint8_t laser_received;
 
 static void record_error(uint8_t state)
 {
@@ -26,6 +29,7 @@ void CAN_Test_Init(void)
     CAN_Test_TxCount = CAN_Test_RxCount = CAN_Test_ErrorCount = 0;
     CAN_Test_LastHalError = 0;
     CAN_Test_State = 0;
+    laser_received = 0;
     request.state = WORK_HELLO;
     request.task = 0;
     request.region = request.result = 0;
@@ -38,6 +42,13 @@ void CAN_Test_Init(void)
     filter.FilterIdHigh = WORK_CAN_REPLY_ID << 5;
     filter.FilterMaskIdHigh = 0x7FFu << 5;
     filter.FilterMaskIdLow = 6u; /* Match standard data frames only. */
+    if (HAL_CAN_ConfigFilter(&hcan2, &filter) != HAL_OK)
+    {
+        record_error(2);
+        return;
+    }
+    filter.FilterBank = 15;
+    filter.FilterIdHigh = CAN_LASER_ID << 5;
     if (HAL_CAN_ConfigFilter(&hcan2, &filter) != HAL_OK ||
         HAL_CAN_Start(&hcan2) != HAL_OK)
     {
@@ -83,12 +94,20 @@ uint8_t Work_CAN_Moving(void)
     return Work_CAN_Online() && (reply.region & WORK_CAN_MOVING_FLAG) != 0;
 }
 
+uint8_t CAN_Laser_Read(uint8_t channel, uint16_t *distance_mm)
+{
+    if (channel >= 4 || distance_mm == 0 || !laser_received) return 0;
+    if ((uint32_t)(HAL_GetTick() - laser_rx_ms) > CAN_LASER_TIMEOUT_MS) return 3;
+    *distance_mm = laser_mm[channel];
+    return *distance_mm <= CAN_LASER_MAX_MM ? 1 : 2;
+}
+
 void CAN_Test_Task(void)
 {
     CAN_RxHeaderTypeDef rx;
     CAN_TxHeaderTypeDef tx = {0};
     WorkCanPacket packet;
-    uint8_t data[8], count = 0;
+    uint8_t data[8], count = 0, i;
     uint32_t now = HAL_GetTick();
     if (!ready) return;
     while (count++ < 8 && HAL_CAN_GetRxFifoFillLevel(&hcan2, CAN_RX_FIFO0))
@@ -98,8 +117,17 @@ void CAN_Test_Task(void)
             record_error(4);
             break;
         }
-        if (rx.IDE != CAN_ID_STD || rx.StdId != WORK_CAN_REPLY_ID ||
-            rx.RTR != CAN_RTR_DATA || rx.DLC != 8 || !work_can_decode(data, &packet))
+        if (rx.IDE != CAN_ID_STD || rx.RTR != CAN_RTR_DATA || rx.DLC != 8)
+            continue;
+        if (rx.StdId == CAN_LASER_ID)
+        {
+            for (i = 0; i < 4; i++)
+                laser_mm[i] = (uint16_t)(((uint16_t)data[2 * i] << 8) | data[2 * i + 1]);
+            laser_rx_ms = now;
+            laser_received = 1;
+            continue;
+        }
+        if (rx.StdId != WORK_CAN_REPLY_ID || !work_can_decode(data, &packet))
             continue;
         if (packet.task != request.task && packet.state != WORK_FAULT) continue;
         if (packet.state != WORK_SYNC && packet.state != WORK_READY &&

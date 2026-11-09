@@ -17,6 +17,7 @@ display = source[start:end]
 harness = r'''
 #include "vision_motor.h"
 #include "work_can.h"
+#include "can_test.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -30,6 +31,11 @@ volatile int32_t Vision_TreeDX = 9999;
 volatile uint8_t OLED_Ready = 1;
 static uint32_t tick;
 static uint8_t online, reply, moving, result, fail_update;
+static uint8_t laser_status[4];
+uint8_t CAN_Laser_Read(uint8_t channel, uint16_t *mm) {
+    *mm = 15000;
+    return laser_status[channel];
+}
 uint32_t HAL_GetTick(void) { return tick; }
 uint32_t __get_PRIMASK(void) { return 0; }
 void __disable_irq(void) {}
@@ -84,8 +90,18 @@ int main(void) {
     }
     online = 0;
     check_car(WORK_STOPPED, "CAR:OFFLINE CAN:OFF");
-    assert(strcmp(rows[4], "A:0 RPM") == 0);
-    assert(strcmp(rows[7], "D:0 RPM") == 0);
+    assert(strcmp(rows[4], "LEFT:WAIT") == 0);
+    assert(strcmp(rows[7], "FRONT:WAIT") == 0);
+    laser_status[0] = 1;
+    laser_status[1] = 2;
+    laser_status[2] = 3;
+    laser_status[3] = 1;
+    tick += 100;
+    OLED_Display();
+    assert(strcmp(rows[4], "LEFT:15000 mm") == 0);
+    assert(strcmp(rows[5], "RIGHT:INVALID") == 0);
+    assert(strcmp(rows[6], "REAR:OFFLINE") == 0);
+    assert(strcmp(rows[7], "FRONT:15000 mm") == 0);
     fail_update = 1;
     tick += 100;
     OLED_Display();

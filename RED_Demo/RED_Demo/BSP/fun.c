@@ -82,10 +82,10 @@ void OLED_PowerOn(void)
     OLED_ShowString(0, 8, "V:OFF R:0 DX:--", OLED_6X8);
     OLED_ShowString(0, 16, "M:0/- STOP PWM:0%", OLED_6X8);
     OLED_ShowString(0, 24, "W:BOOT E:0", OLED_6X8);
-    OLED_ShowString(0, 32, "A:0 RPM", OLED_6X8);
-    OLED_ShowString(0, 40, "B:0 RPM", OLED_6X8);
-    OLED_ShowString(0, 48, "C:0 RPM", OLED_6X8);
-    OLED_ShowString(0, 56, "D:0 RPM", OLED_6X8);
+    OLED_ShowString(0, 32, "LEFT:WAIT", OLED_6X8);
+    OLED_ShowString(0, 40, "RIGHT:WAIT", OLED_6X8);
+    OLED_ShowString(0, 48, "REAR:WAIT", OLED_6X8);
+    OLED_ShowString(0, 56, "FRONT:WAIT", OLED_6X8);
     OLED_Update();
     if (OLED_I2C_LastError != 0) OLED_Ready = 0;
 }
@@ -100,8 +100,9 @@ void OLED_Display(void)
     uint32_t remaining_tenths;
     const char *direction, *car_state, *job_state;
     uint8_t reply, online, result;
-    int32_t rpm[4];
-    uint32_t primask;
+    static const char *laser_names[4] = {"LEFT", "RIGHT", "REAR", "FRONT"};
+    uint16_t distance_mm;
+    uint8_t laser_status;
     if (!first_display && (uint32_t)(now - last_display) < 100U) return;
     first_display = 0;
     last_display = now;
@@ -113,11 +114,6 @@ void OLED_Display(void)
         OLED_Init();
         if (!OLED_Ready) return;
     }
-    /* ���ٽ���������·ת�٣��ָ�ԭ���ж�״̬�����������;���¡� */
-    primask = __get_PRIMASK();
-    __disable_irq();
-    for (i = 0; i < 4; i++) rpm[i] = Speed[i];
-    __set_PRIMASK(primask);
     phase = Vision_MotorPhase;
     motor = Vision_MotorRegion;
     pwm = (phase == 1 || phase == 3) ? VISION_MOTOR_PWM : 0;
@@ -168,7 +164,14 @@ void OLED_Display(void)
     OLED_ShowString(0, 24, str, OLED_6X8);
     for (i = 0; i < 4; i++)
     {
-        sprintf(str, "%c:%ld RPM", 'A' + i, (long)rpm[i]);
+        laser_status = CAN_Laser_Read(i, &distance_mm);
+        switch (laser_status)
+        {
+        case 1: snprintf(str, sizeof(str), "%s:%u mm", laser_names[i], distance_mm); break;
+        case 2: snprintf(str, sizeof(str), "%s:INVALID", laser_names[i]); break;
+        case 3: snprintf(str, sizeof(str), "%s:OFFLINE", laser_names[i]); break;
+        default: snprintf(str, sizeof(str), "%s:WAIT", laser_names[i]); break;
+        }
         OLED_ShowString(0, 32 + i * 8, str, OLED_6X8);
     }
     OLED_I2C_LastError = 0;

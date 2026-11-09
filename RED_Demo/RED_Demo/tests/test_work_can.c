@@ -22,6 +22,8 @@ static Can3EndpointCallback request_callback;
 static STM32HalCanRxCallback wheel_callback;
 static uint8_t reply_queue[32][8];
 static unsigned queue_read, queue_write;
+static uint8_t laser_pending, laser_data[8];
+static CAN_RxHeaderTypeDef laser_header;
 
 uint32_t HAL_GetTick(void) { return now_ms; }
 uint32_t __get_PRIMASK(void) { return 0; }
@@ -52,7 +54,8 @@ Can3BusStatus can3_bus_send(uint16_t id, const uint8_t* data, uint8_t len) {
 }
 int HAL_CAN_ConfigFilter(CAN_HandleTypeDef* can, CAN_FilterTypeDef* f) {
     (void)can;
-    assert(f->FilterBank == 14 && f->FilterIdHigh == WORK_CAN_REPLY_ID << 5);
+    assert((f->FilterBank == 14 && f->FilterIdHigh == WORK_CAN_REPLY_ID << 5) ||
+           (f->FilterBank == 15 && f->FilterIdHigh == CAN_LASER_ID << 5));
     assert(f->FilterMaskIdLow == 6 && f->FilterMaskIdHigh == 0x7FFu << 5);
     return HAL_OK;
 }
@@ -62,10 +65,16 @@ int HAL_CAN_AbortTxRequest(CAN_HandleTypeDef* can, uint32_t box) { (void)can; (v
 uint32_t HAL_CAN_IsTxMessagePending(CAN_HandleTypeDef* can, uint32_t box) { (void)can; (void)box; return 0; }
 uint32_t HAL_CAN_GetTxMailboxesFreeLevel(CAN_HandleTypeDef* can) { (void)can; return 3; }
 uint32_t HAL_CAN_GetRxFifoFillLevel(CAN_HandleTypeDef* can, uint32_t fifo) {
-    (void)can; (void)fifo; return queue_write - queue_read;
+    (void)can; (void)fifo; return queue_write - queue_read + laser_pending;
 }
 int HAL_CAN_GetRxMessage(CAN_HandleTypeDef* can, uint32_t fifo, CAN_RxHeaderTypeDef* h, uint8_t* data) {
     (void)can; (void)fifo;
+    if (laser_pending) {
+        *h = laser_header;
+        memcpy(data, laser_data, 8);
+        laser_pending = 0;
+        return HAL_OK;
+    }
     h->IDE = CAN_ID_STD; h->RTR = CAN_RTR_DATA; h->DLC = 8; h->StdId = WORK_CAN_REPLY_ID;
     memcpy(data, reply_queue[queue_read++ % 32], 8);
     return HAL_OK;
@@ -260,9 +269,55 @@ static void test_parser(void) {
     assert(last_tx_time <= now_ms);
     puts("WORK_VISION_PARSER_OK");
 }
+static void test_laser_display_input(void) {
+    uint16_t mm = 0;
+    uint32_t rx_count;
+    const uint8_t sample[8] = {0, 0, 0x3a, 0x98, 0x3a, 0x99, 0xff, 0xff};
+    reset_at(UINT32_MAX - 200u);
+    assert(CAN_Laser_Read(0, &mm) == 0);
+    memcpy(laser_data, sample, 8);
+    laser_header.IDE = CAN_ID_STD;
+    laser_header.RTR = CAN_RTR_DATA;
+    laser_header.DLC = 7;
+    laser_header.StdId = CAN_LASER_ID;
+    laser_pending = 1;
+    CAN_Test_Task();
+    assert(CAN_Laser_Read(0, &mm) == 0);
+    laser_header.DLC = 8;
+    laser_header.IDE = 1; /* Extended frames are rejected. */
+    laser_pending = 1;
+    CAN_Test_Task();
+    assert(CAN_Laser_Read(0, &mm) == 0);
+    laser_header.IDE = CAN_ID_STD;
+    laser_header.RTR = 1; /* Remote frames are rejected. */
+    laser_pending = 1;
+    CAN_Test_Task();
+    assert(CAN_Laser_Read(0, &mm) == 0);
+    laser_header.RTR = CAN_RTR_DATA;
+    rx_count = CAN_Test_RxCount;
+    laser_pending = 1;
+    CAN_Test_Task();
+    assert(CAN_Test_RxCount == rx_count); /* Laser cannot refresh chassis heartbeat. */
+    assert(CAN_Laser_Read(0, &mm) == 1 && mm == 0);
+    assert(CAN_Laser_Read(1, &mm) == 1 && mm == 15000);
+    assert(CAN_Laser_Read(2, &mm) == 2 && mm == 15001);
+    assert(CAN_Laser_Read(3, &mm) == 2 && mm == 65535);
+    assert(CAN_Laser_Read(4, &mm) == 0 && CAN_Laser_Read(0, NULL) == 0);
+    now_ms += CAN_LASER_TIMEOUT_MS;
+    assert(CAN_Laser_Read(0, &mm) == 1);
+    now_ms++;
+    assert(CAN_Laser_Read(0, &mm) == 3);
+    laser_pending = 1;
+    CAN_Test_Task();
+    assert(CAN_Laser_Read(1, &mm) == 1 && mm == 15000);
+    CAN_Test_Init();
+    assert(CAN_Laser_Read(0, &mm) == 0);
+    puts("LASER_INPUT_ENDIAN_RANGE_TIMEOUT_WRAP_RECOVERY_OK");
+}
 int main(void) {
     setbuf(stdout, NULL);
     test_parser(); test_full_tree(); test_faults(); test_limits(); test_wait_without_slow();
+    test_laser_display_input();
     puts("WORK_CAN_INTEROP_TEST_OK");
     return 0;
 }
