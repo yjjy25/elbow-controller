@@ -10,9 +10,9 @@ chassis = workspace / "Mango-Swerve-Firmware/firmware"
 compiler = shutil.which("gcc")
 if compiler is None:
     raise RuntimeError("MinGW gcc is required")
-assert (root / "BSP/work_can_protocol.h").read_bytes() == (
+assert (root / "BSP/work_can_protocol.h").read_text() == (
     chassis / "src/service/work_can_protocol.h"
-).read_bytes(), "The two protocol headers differ"
+).read_text(), "The two protocol headers differ"
 
 can_source = (root / "Core/Src/can.c").read_text()
 ioc = (root / "RED_Demo.ioc").read_text()

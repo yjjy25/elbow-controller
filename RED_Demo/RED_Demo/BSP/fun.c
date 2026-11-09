@@ -5,6 +5,7 @@
  *       TIM5 ÿ 10ms ��������ʾ�����봮�����������ѭ����ִ�С�
  */
 #include "headfile.h"
+#include "work_can.h"
 
 char str[32];                  /* OLED ���и�ʽ���������� */
 char uart_rx[32];              /* ���ڽ��ջ����������ݲ���֤���ַ�����������β�� */
@@ -77,10 +78,10 @@ void OLED_PowerOn(void)
     OLED_Init();
     if (!OLED_Ready) return;
     OLED_Clear();
-    OLED_ShowString(0, 0, "SYSTEM STARTING", OLED_6X8);
+    OLED_ShowString(0, 0, "CAR:WAIT CAN:WAIT", OLED_6X8);
     OLED_ShowString(0, 8, "V:OFF R:0 DX:--", OLED_6X8);
     OLED_ShowString(0, 16, "M:0/- STOP PWM:0%", OLED_6X8);
-    OLED_ShowString(0, 24, "WAIT MAIXCAM", OLED_6X8);
+    OLED_ShowString(0, 24, "W:BOOT E:0", OLED_6X8);
     OLED_ShowString(0, 32, "A:0 RPM", OLED_6X8);
     OLED_ShowString(0, 40, "B:0 RPM", OLED_6X8);
     OLED_ShowString(0, 48, "C:0 RPM", OLED_6X8);
@@ -97,7 +98,8 @@ void OLED_Display(void)
     uint32_t now = HAL_GetTick();
     uint8_t i, phase, motor, pwm;
     uint32_t remaining_tenths;
-    const char *direction;
+    const char *direction, *car_state, *job_state;
+    uint8_t reply, online, result;
     int32_t rpm[4];
     uint32_t primask;
     if (!first_display && (uint32_t)(now - last_display) < 100U) return;
@@ -119,8 +121,34 @@ void OLED_Display(void)
     phase = Vision_MotorPhase;
     motor = Vision_MotorRegion;
     pwm = (phase == 1 || phase == 3) ? VISION_MOTOR_PWM : 0;
-    direction = phase == 1 ? "CW" : phase == 2 ? "PAUSE" :
-                phase == 3 ? "CCW" : phase == 4 ? "COOL" : "STOP";
+    direction = phase == 1 ? "HIT" : phase == 2 ? "PAUSE" :
+                phase == 3 ? "BACK" : phase == 4 ? "COOL" : "STOP";
+    online = Work_CAN_Online();
+    reply = Work_CAN_GetReply(Vision_WorkTask);
+    switch (reply)
+    {
+    case WORK_SYNC: car_state = "SYNC"; break;
+    case WORK_READY: car_state = Work_CAN_Moving() ? "MOVING" : "READY"; break;
+    case WORK_SLOW_ACK: car_state = "SLOW"; break;
+    case WORK_STOPPING: car_state = "STOPPING"; break;
+    case WORK_STOPPED: car_state = "STOPPED"; break;
+    case WORK_GO_ACK: car_state = Work_CAN_Moving() ? "MOVING" : "RELEASED"; break;
+    case WORK_FAULT: car_state = "FAULT"; break;
+    default: car_state = online ? "WAIT" : "OFFLINE"; break;
+    }
+    switch (Vision_WorkState)
+    {
+    case VISION_WORK_BOOT: job_state = "BOOT"; break;
+    case VISION_WORK_IDLE: job_state = "IDLE"; break;
+    case VISION_WORK_APPROACH: job_state = "APPROACH"; break;
+    case VISION_WORK_WAIT_STOP: job_state = "WAIT_STOP"; break;
+    case VISION_WORK_CHECK: job_state = "CHECK"; break;
+    case VISION_WORK_ACTING: job_state = "ACTING"; break;
+    case VISION_WORK_RELEASE: job_state = "RELEASE"; break;
+    case VISION_WORK_LEAVING: job_state = "LEAVING"; break;
+    default: job_state = "FAULT"; break;
+    }
+    result = reply == WORK_FAULT ? Work_CAN_Result() : Vision_WorkResult;
     remaining_tenths = (Vision_Motor_RemainingMs() + 99U) / 100U;
     OLED_Clear();
     if (Vision_TreeDX == 9999)
@@ -129,14 +157,14 @@ void OLED_Display(void)
         sprintf(str, "V:%s R:%u DX:%ld", Vision_Online ? "ON" : "OFF",
                 Vision_Region, (long)Vision_TreeDX);
     OLED_ShowString(0, 0, str, OLED_6X8);
-    sprintf(str, "M:%u/%c %s PWM:%u%%", motor, motor ? 'A' + motor - 1 : '-',
-            direction, pwm);
+    snprintf(str, sizeof(str), "%c %s %lu.%lus %u%%",
+            motor ? 'A' + motor - 1 : '-', direction,
+            (unsigned long)(remaining_tenths / 10U),
+            (unsigned long)(remaining_tenths % 10U), pwm);
     OLED_ShowString(0, 8, str, OLED_6X8);
-    sprintf(str, "LEFT:%lu.%lus %s", (unsigned long)(remaining_tenths / 10U),
-            (unsigned long)(remaining_tenths % 10U),
-            phase ? "BUSY" : (Vision_Motor_IsArmed() ? "READY" : "WAIT"));
+    snprintf(str, sizeof(str), "CAR:%s CAN:%s", car_state, online ? "ON" : "OFF");
     OLED_ShowString(0, 16, str, OLED_6X8);
-    sprintf(str, "RX:%lu", (unsigned long)Vision_FrameCount);
+    snprintf(str, sizeof(str), "W:%s E:%u C:%u", job_state, result, CAN_Test_State);
     OLED_ShowString(0, 24, str, OLED_6X8);
     for (i = 0; i < 4; i++)
     {

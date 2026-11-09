@@ -3,6 +3,35 @@
 
 #include "main.h"
 
+/* Work-cycle parameters. Pixel offsets use the camera output coordinates. */
+#define WORK_DX_CENTER 0
+#define WORK_SLOW_DX 100
+#define WORK_STOP_DX 30
+#define WORK_LEAVE_DX 120
+#define WORK_LEAVE_DIRECTION (-1)
+#define WORK_TARGET_STABLE_MS 200U
+#define WORK_SETTLE_MS 300U
+#define WORK_FRESH_VISION_MS 200U
+#define WORK_NO_TARGET_MS 500U
+#define WORK_NO_TARGET_FRAMES 3U
+#define WORK_MAX_ATTEMPTS_PER_REGION 2U
+#define WORK_TREE_TIMEOUT_MS 8000U
+#define WORK_STOP_TIMEOUT_MS 2000U
+#define WORK_VISION_WAIT_MS 2000U
+#define WORK_LEAVE_MISSING_MS 600U
+#define WORK_LEAVE_MIN_MOVING_MS 300U
+
+typedef enum {
+    VISION_WORK_BOOT, VISION_WORK_IDLE, VISION_WORK_APPROACH,
+    VISION_WORK_WAIT_STOP, VISION_WORK_CHECK, VISION_WORK_ACTING,
+    VISION_WORK_RELEASE, VISION_WORK_LEAVING, VISION_WORK_FAULT
+} VisionWorkState;
+
+extern volatile uint8_t Vision_WorkState, Vision_WorkResult;
+extern volatile uint32_t Vision_WorkTask;
+uint8_t Vision_Motor_Start(uint8_t region);
+uint32_t Vision_Motor_ReturnedAt(void);
+
 /* ==================== 常用参数：主要修改下面五行 ====================
  * 修改方法：只改右侧数字，保留数字后面的 U。U 是 C 语言的类型标记，不是单位。
  * 时间单位：毫秒，1000 毫秒 = 1 秒；500 = 0.5 秒；5000 = 5 秒。
